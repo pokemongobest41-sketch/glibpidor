@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Gift Watcher</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #000; color: #f2f2f2; font: 15px/1.4 -apple-system, system-ui, sans-serif; padding: 16px; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+  input[type=text] { flex: 1; min-width: 0; background: #111; color: #fff; border: 1px solid #2a2a2a; border-radius: 10px; padding: 11px 12px; font-size: 15px; }
+  button { background: #1d1d1d; color: #fff; border: 1px solid #2a2a2a; border-radius: 10px; padding: 11px 14px; font-size: 15px; }
+  label { display: flex; align-items: center; gap: 8px; color: #aaa; }
+  #status { color: #888; font-size: 13px; margin: 6px 0 12px; min-height: 18px; }
+  .card { background: #0d0d0d; border: 1px solid #222; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .card b { font-size: 16px; }
+  .meta { color: #999; font-size: 13px; margin-top: 2px; }
+  .bd { display: inline-block; background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 1px 7px; margin-top: 6px; font-size: 13px; }
+  a { color: #4ea1ff; text-decoration: none; display: inline-block; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>🎁 Gift Watcher</h1>
+
+<div class="row">
+  <input id="backdrop" type="text" placeholder="Фон" value="Black">
+  <label><input id="all" type="checkbox"> Все</label>
+</div>
+<div id="status">Подключаюсь…</div>
+<div id="list"></div>
+
+<div class="row" style="margin-top:18px">
+  <input id="newslug" type="text" placeholder="Добавить коллекцию, напр. LootBag" autocapitalize="off" autocorrect="off">
+  <button id="add">+</button>
+</div>
+
+<script>
+const tg = window.Telegram && Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor && tg.setHeaderColor('#000000'); tg.setBackgroundColor && tg.setBackgroundColor('#000000'); }
+const $ = id => document.getElementById(id);
+
+let last = 0, shown = 0;
+
+try {
+  const s = JSON.parse(localStorage.getItem('gw2') || '{}');
+  if (s.backdrop !== undefined) $('backdrop').value = s.backdrop;
+  $('all').checked = !!s.all;
+} catch (e) {}
+function save() { try { localStorage.setItem('gw2', JSON.stringify({ backdrop: $('backdrop').value, all: $('all').checked })); } catch (e) {} }
+$('backdrop').oninput = $('all').onchange = save;
+
+function ago(ts) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  return s < 60 ? `${s} с назад` : s < 3600 ? `${Math.floor(s / 60)} мин назад` : `${Math.floor(s / 3600)} ч назад`;
+}
+
+function addCard(g) {
+  const c = document.createElement('div'); c.className = 'card';
+  const t = document.createElement('b'); t.textContent = `${g.slug} #${g.n}`;
+  const m = document.createElement('div'); m.className = 'meta'; m.textContent = `${g.model || ''} · ${ago(g.ts)}`;
+  const o = document.createElement('div'); o.className = 'meta'; o.textContent = 'Владелец: ' + (g.owner || 'скрыт');
+  const b = document.createElement('span'); b.className = 'bd'; b.textContent = g.backdrop || '—';
+  const a = document.createElement('a'); a.href = g.url; a.textContent = 'Открыть в Telegram';
+  a.onclick = e => { if (tg && tg.openTelegramLink) { e.preventDefault(); tg.openTelegramLink(g.url); } };
+  c.append(t, m, o, b, document.createElement('br'), a);
+  $('list').prepend(c);
+  while ($('list').children.length > 200) $('list').lastChild.remove();
+}
+
+async function tick() {
+  try {
+    const d = await (await fetch(`/api/feed?since=${last}`)).json();
+    const want = $('backdrop').value.trim().toLowerCase();
+    const all = $('all').checked;
+    d.events.forEach(g => {
+      if (all || (g.backdrop && g.backdrop.toLowerCase().includes(want))) {
+        addCard(g); shown++;
+        if (last > 0 && tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      }
+    });
+    last = d.last;
+    $('status').textContent = `Слежу за ${d.tracking} из ${d.total} коллекций · найдено: ${shown}` + (d.error ? ` · ${d.error}` : '');
+  } catch (e) {
+    $('status').textContent = 'Нет связи с сервером, повторяю…';
+  }
+  setTimeout(tick, 3000);
+}
+tick();
+
+$('add').onclick = async () => {
+  const slug = $('newslug').value.trim();
+  if (!/^[A-Za-z0-9]+$/.test(slug)) return;
+  await fetch('/api/collections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
+  $('newslug').value = '';
+  $('status').textContent = 'Добавлено, подключится в течение минуты';
+};
+</script>
+</body>
+</html>
